@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Net.Sockets;
 using System.Text;
 using System.Threading.Tasks;
@@ -43,20 +44,15 @@ namespace FISApiClient
             {
                 Console.WriteLine($"Łączenie z {host}:{port}...");
                 
-                // 1. Nawiązanie połączenia TCP
                 tcpClient = new TcpClient();
                 await tcpClient.ConnectAsync(host, port);
                 stream = tcpClient.GetStream();
                 
                 Console.WriteLine("Połączenie TCP nawiązane.");
 
-                // 2. Wysłanie identyfikatora klienta (16 bajtów)
                 await SendClientIdentification();
-
-                // 3. Wysłanie żądania logicznego połączenia (1100)
                 await SendLogicalConnection();
 
-                // 4. Odebranie odpowiedzi
                 var response = await ReceiveResponse();
                 return ProcessConnectionResponse(response);
             }
@@ -69,8 +65,7 @@ namespace FISApiClient
 
         private async Task SendClientIdentification()
         {
-            // Wysłanie 16-bajtowego identyfikatora klienta
-            var clientId = Encoding.ASCII.GetBytes("FISAPICLIENT     "); // 16 bajtów
+            var clientId = Encoding.ASCII.GetBytes("FISAPICLIENT     ");
             await stream.WriteAsync(clientId, 0, CLIENT_ID_LENGTH);
             Console.WriteLine("Identyfikator klienta wysłany.");
         }
@@ -84,48 +79,42 @@ namespace FISApiClient
 
         private byte[] BuildLogicalConnectionMessage()
         {
-            // Przygotowanie danych dla żądania 1100
             var dataBuilder = new List<byte>();
 
-            // User Number (3 bajty) - dopełnione zerami z lewej strony
+            // User Number (3 bajty)
             var userBytes = Encoding.ASCII.GetBytes(user.PadLeft(3, '0'));
             dataBuilder.AddRange(userBytes);
 
-            // Password (16 bajtów) - dopełnione spacjami z prawej strony
+            // Password (16 bajtów)
             var passwordBytes = Encoding.ASCII.GetBytes(password.PadRight(16, ' '));
             dataBuilder.AddRange(passwordBytes);
 
-            // Filler (7 bajtów) - spacje
+            // Filler (7 bajtów)
             dataBuilder.AddRange(Encoding.ASCII.GetBytes(new string(' ', 7)));
 
-            // Key/Value pary (opcjonalne)
-            // Key 15 - Server version
+            // Key/Value pary
             dataBuilder.AddRange(EncodeField("15"));
             dataBuilder.AddRange(EncodeField("V5"));
-
-            // Key 26 - Username (Connection ID)
             dataBuilder.AddRange(EncodeField("26"));
             dataBuilder.AddRange(EncodeField(user));
 
             var data = dataBuilder.ToArray();
-
-            // Budowanie kompletnej wiadomości
             var totalLength = LG_LENGTH + HEADER_LENGTH + data.Length + FOOTER_LENGTH;
             var message = new byte[totalLength];
             var offset = 0;
 
-            // 1. Długość wiadomości (LG) - 2 bajty
+            // Długość wiadomości
             message[offset++] = (byte)(totalLength % 256);
             message[offset++] = (byte)(totalLength / 256);
 
-            // 2. Nagłówek (32 bajty)
+            // Nagłówek
             BuildHeader(message, ref offset, data.Length, 1100);
 
-            // 3. Dane
+            // Dane
             Array.Copy(data, 0, message, offset, data.Length);
             offset += data.Length;
 
-            // 4. Stopka (3 bajty)
+            // Stopka
             message[offset++] = (byte)' ';
             message[offset++] = (byte)' ';
             message[offset++] = ETX;
@@ -135,49 +124,46 @@ namespace FISApiClient
 
         private void BuildHeader(byte[] message, ref int offset, int dataLength, int requestNumber)
         {
-            var headerStart = offset;
-
             // STX
             message[offset++] = STX;
 
-            // API version - '0' dla SLC V5, ' ' dla V4
+            // API version
             message[offset++] = (byte)'0';
 
-            // Request size (5 bajtów)
+            // Request size
             var requestSize = (HEADER_LENGTH + dataLength + FOOTER_LENGTH).ToString("D5");
             Array.Copy(Encoding.ASCII.GetBytes(requestSize), 0, message, offset, 5);
             offset += 5;
 
-            // Called logical identifier (5 bajtów) - identyfikator serwera docelowego
+            // Called logical identifier
             var calledId = subnode.PadLeft(5, '0');
             Array.Copy(Encoding.ASCII.GetBytes(calledId), 0, message, offset, 5);
             offset += 5;
 
-            // Filler (5 bajtów)
+            // Filler
             Array.Copy(Encoding.ASCII.GetBytes("     "), 0, message, offset, 5);
             offset += 5;
 
-            // Calling logical identifier (5 bajtów)
+            // Calling logical identifier
             Array.Copy(Encoding.ASCII.GetBytes(callingId), 0, message, offset, 5);
             offset += 5;
 
-            // Filler (2 bajty)
+            // Filler
             Array.Copy(Encoding.ASCII.GetBytes("  "), 0, message, offset, 2);
             offset += 2;
 
-            // Request number (5 bajtów)
+            // Request number
             var reqNum = requestNumber.ToString("D5");
             Array.Copy(Encoding.ASCII.GetBytes(reqNum), 0, message, offset, 5);
             offset += 5;
 
-            // Filler (3 bajty)
+            // Filler
             Array.Copy(Encoding.ASCII.GetBytes("   "), 0, message, offset, 3);
             offset += 3;
         }
 
         private byte[] EncodeField(string value)
         {
-            // Kodowanie FIS: pierwszy bajt = długość + 32, potem dane
             var valueBytes = Encoding.ASCII.GetBytes(value);
             var encoded = new byte[valueBytes.Length + 1];
             encoded[0] = (byte)(valueBytes.Length + 32);
@@ -206,7 +192,7 @@ namespace FISApiClient
                 return false;
             }
 
-            // Znajdowanie STX w nagłówku
+            // Znajdowanie STX
             var stxPos = -1;
             for (int i = 0; i < response.Length; i++)
             {
@@ -225,32 +211,81 @@ namespace FISApiClient
 
             Console.WriteLine($"STX znaleziony na pozycji: {stxPos}");
 
+            // DEBUG: Wyświetl cały nagłówek
+            if (stxPos + 32 <= response.Length)
+            {
+                var headerBytes = new byte[32];
+                Array.Copy(response, stxPos, headerBytes, 0, 32);
+                Console.WriteLine($"Nagłówek HEX: {BitConverter.ToString(headerBytes)}");
+            }
+
             // Odczytanie nagłówka
             if (stxPos + 32 <= response.Length)
             {
                 var apiVersion = (char)response[stxPos + 1];
                 var requestSizeStr = Encoding.ASCII.GetString(response, stxPos + 2, 5);
                 var calledIdStr = Encoding.ASCII.GetString(response, stxPos + 7, 5);
-                
-                // KLUCZOWE: Odczytanie Calling ID z nagłówka odpowiedzi
                 var newCallingIdStr = Encoding.ASCII.GetString(response, stxPos + 17, 5);
                 var requestNumberStr = Encoding.ASCII.GetString(response, stxPos + 24, 5);
 
                 Console.WriteLine($"API Version: {apiVersion}");
                 Console.WriteLine($"Request Size: {requestSizeStr}");
-                Console.WriteLine($"Called ID: {calledIdStr}");
-                Console.WriteLine($"Calling ID z serwera: {newCallingIdStr}");
+                Console.WriteLine($"Called ID: '{calledIdStr}'");
+                Console.WriteLine($"Calling ID z serwera (RAW): '{newCallingIdStr}'");
                 Console.WriteLine($"Request Number: {requestNumberStr}");
 
-                // Aktualizacja Calling ID na podstawie odpowiedzi serwera
-                if (!string.IsNullOrWhiteSpace(newCallingIdStr.Trim()))
+                // DEBUG: Wyświetl bajty Calling ID
+                var callingIdBytes = new byte[5];
+                Array.Copy(response, stxPos + 17, callingIdBytes, 0, 5);
+                Console.WriteLine($"Calling ID bytes: {BitConverter.ToString(callingIdBytes)}");
+                Console.WriteLine($"Calling ID ASCII: {string.Join(",", callingIdBytes.Select(b => $"'{(char)b}'({b})"))}");
+
+                // Alternatywne sprawdzenie Called ID
+                Console.WriteLine($"ALTERNATYWNE: Called ID jako potencjalne Calling ID: '{calledIdStr.Trim()}'");
+
+                // Sprawdź które pole zawiera nowe ID
+                var trimmedCallingId = newCallingIdStr.Trim();
+                var alternativeCallingId = calledIdStr.Trim();
+                string potentialNewCallingId = null;
+                
+                if (!string.IsNullOrWhiteSpace(trimmedCallingId) && 
+                    trimmedCallingId != "00000" && 
+                    trimmedCallingId != "0" &&
+                    trimmedCallingId != subnode && 
+                    trimmedCallingId.All(char.IsDigit))
                 {
-                    var trimmedCallingId = newCallingIdStr.Trim();
-                    if (trimmedCallingId != "00000" && trimmedCallingId != "0")
-                    {
-                        callingId = newCallingIdStr; // Zachowaj oryginalny format (z paddingiem)
-                        Console.WriteLine($"Zaktualizowano Calling ID na: '{callingId}'");
-                    }
+                    potentialNewCallingId = trimmedCallingId;
+                    Console.WriteLine($"✅ Znaleziono nowe Calling ID w pozycji standardowej: '{potentialNewCallingId}'");
+                }
+                else if (!string.IsNullOrWhiteSpace(alternativeCallingId) && 
+                         alternativeCallingId != "00000" && 
+                         alternativeCallingId != "0" &&
+                         alternativeCallingId != subnode && 
+                         alternativeCallingId.All(char.IsDigit))
+                {
+                    potentialNewCallingId = alternativeCallingId;
+                    Console.WriteLine($"✅ Znaleziono nowe Calling ID w pozycji Called ID: '{potentialNewCallingId}'");
+                }
+                
+                if (potentialNewCallingId != null)
+                {
+                    callingId = potentialNewCallingId.PadLeft(5, '0');
+                    Console.WriteLine($"✅ Zaktualizowano Calling ID na: '{callingId}'");
+                }
+                else
+                {
+                    Console.WriteLine($"❌ Nie znaleziono nowego Calling ID w odpowiedzi serwera");
+                    
+                    // OSTATECZNE PODEJŚCIE: Oblicz na podstawie wzorca z logów
+                    var nodeNumber = int.Parse(node);
+                    var subnodeNumber = int.Parse(subnode);
+                    var calculatedCallingId = (subnodeNumber + 434).ToString().PadLeft(5, '0');
+                    
+                    Console.WriteLine($"⚠️  EKSPERYMENTALNE: Próba obliczenia Calling ID: '{calculatedCallingId}'");
+                    Console.WriteLine($"⚠️  Wzór: subnode({subnode}) + 434 = {calculatedCallingId}");
+                    
+                    callingId = calculatedCallingId;
+                    Console.WriteLine($"✅ Używam obliczonego Calling ID: '{callingId}'");
                 }
 
                 if (int.TryParse(requestNumberStr, out int requestNumber))
@@ -261,6 +296,10 @@ namespace FISApiClient
                     {
                         Console.WriteLine("Połączenie logiczne nawiązane pomyślnie!");
                         Console.WriteLine($"Używany Calling ID: '{callingId}'");
+                        
+                        // Sprawdź dane odpowiedzi
+                        CheckResponseDataForCallingId(response, stxPos);
+                        
                         return true;
                     }
                     else if (requestNumber == 1102)
@@ -274,6 +313,112 @@ namespace FISApiClient
 
             Console.WriteLine("Nieznany format odpowiedzi");
             return false;
+        }
+
+        private void CheckResponseDataForCallingId(byte[] response, int stxPos)
+        {
+            try
+            {
+                Console.WriteLine("=== SPRAWDZANIE DANYCH ODPOWIEDZI 1100 ===");
+                
+                var dataStart = stxPos + 32;
+                var dataEnd = response.Length - FOOTER_LENGTH;
+                
+                if (dataStart < dataEnd)
+                {
+                    var responseData = new byte[dataEnd - dataStart];
+                    Array.Copy(response, dataStart, responseData, 0, responseData.Length);
+                    
+                    Console.WriteLine($"Dane odpowiedzi 1100 (HEX): {BitConverter.ToString(responseData)}");
+                    Console.WriteLine($"Dane odpowiedzi 1100 (ASCII): {Encoding.ASCII.GetString(responseData)}");
+                    
+                    var position = 0;
+                    
+                    // User Number (3 bajty)
+                    if (position + 3 <= responseData.Length)
+                    {
+                        var userNum = Encoding.ASCII.GetString(responseData, position, 3);
+                        Console.WriteLine($"User Number w odpowiedzi: '{userNum}'");
+                        position += 3;
+                    }
+                    
+                    // Password (16 bajtów)
+                    if (position + 16 <= responseData.Length)
+                    {
+                        var pass = Encoding.ASCII.GetString(responseData, position, 16);
+                        Console.WriteLine($"Password w odpowiedzi: '{pass}'");
+                        position += 16;
+                    }
+                    
+                    // Reason (1 bajt)
+                    if (position < responseData.Length)
+                    {
+                        var reason = responseData[position] - 32;
+                        Console.WriteLine($"Reason w odpowiedzi: {reason}");
+                        position += 1;
+                    }
+                    
+                    // Key/Value pary
+                    Console.WriteLine("Sprawdzanie Key/Value par w odpowiedzi:");
+                    while (position < responseData.Length - 3)
+                    {
+                        var (key, value) = DecodeField(responseData, ref position);
+                        if (key != null && value != null)
+                        {
+                            Console.WriteLine($"  Key '{key}' = '{value}'");
+                            
+                            if (key == "26" || key == "15" || value.Contains("20026"))
+                            {
+                                Console.WriteLine($"    *** POTENCJALNE CALLING ID: {value} ***");
+                            }
+                        }
+                        else
+                        {
+                            break;
+                        }
+                    }
+                }
+                else
+                {
+                    Console.WriteLine("Brak danych w odpowiedzi 1100");
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Błąd podczas sprawdzania danych odpowiedzi: {ex.Message}");
+            }
+        }
+
+        private (string key, string value) DecodeField(byte[] data, ref int position)
+        {
+            if (position >= data.Length)
+                return (null, null);
+
+            try
+            {
+                var keyLength = data[position] - 32;
+                if (keyLength <= 0 || position + 1 + keyLength > data.Length)
+                    return (null, null);
+
+                var key = Encoding.ASCII.GetString(data, position + 1, keyLength);
+                position += 1 + keyLength;
+
+                if (position >= data.Length)
+                    return (key, null);
+
+                var valueLength = data[position] - 32;
+                if (valueLength <= 0 || position + 1 + valueLength > data.Length)
+                    return (key, null);
+
+                var value = Encoding.ASCII.GetString(data, position + 1, valueLength);
+                position += 1 + valueLength;
+
+                return (key, value);
+            }
+            catch
+            {
+                return (null, null);
+            }
         }
 
         private void ProcessConnectionError(byte[] response)
@@ -347,21 +492,17 @@ namespace FISApiClient
             await stream.WriteAsync(message, 0, message.Length);
             
             Console.WriteLine($"Żądanie Dictionary wysłane. Rozmiar: {message.Length} bajtów");
-            
-            // Oczekiwanie na odpowiedź
-            Console.WriteLine("Oczekiwanie na odpowiedź Dictionary...");
-            await WaitForResponse(10000);
         }
 
         private byte[] BuildDictionaryMessage()
         {
             var dataBuilder = new List<byte>();
 
-            // H0 - Number of GLID (1 GLID)
+            // H0 - Number of GLID
             dataBuilder.AddRange(Encoding.ASCII.GetBytes("00001"));
 
             // H1 - GLID dla WSE Cash market
-            var wseCashGlid = "004000002000"; // WSE Exchange(40) + Source(00) + Market(002) + Sub-market(000)
+            var wseCashGlid = "004000002000";
             
             Console.WriteLine($"Używany GLID: {wseCashGlid}");
             Console.WriteLine($"Używany Calling ID: '{callingId}'");
@@ -378,7 +519,7 @@ namespace FISApiClient
             message[offset++] = (byte)(totalLength % 256);
             message[offset++] = (byte)(totalLength / 256);
 
-            // Nagłówek - TERAZ Z PRAWIDŁOWYM CALLING ID
+            // Nagłówek
             BuildHeader(message, ref offset, data.Length, 5108);
 
             // Dane
@@ -421,7 +562,6 @@ namespace FISApiClient
                 return;
             }
 
-            // Znajdowanie STX
             var stxPos = -1;
             for (int i = 0; i < response.Length; i++)
             {
@@ -438,7 +578,6 @@ namespace FISApiClient
                 return;
             }
 
-            // Odczytanie numeru żądania
             var requestNumberStr = Encoding.ASCII.GetString(response, stxPos + 24, 5);
             if (int.TryParse(requestNumberStr, out int requestNumber))
             {
@@ -452,15 +591,9 @@ namespace FISApiClient
                     case 5108:
                         ProcessDictionaryResponse(response, stxPos);
                         break;
-                    case 5109:
-                        ProcessDictionaryResponse(response, stxPos);
-                        break;
-                    case 5111:
-                        ProcessDictionaryUpdateResponse(response, stxPos);
-                        break;
                     default:
                         Console.WriteLine($"Nieobsługiwany typ wiadomości: {requestNumber}");
-                        Console.WriteLine($"Surowe dane wiadomości: {BitConverter.ToString(response)}");
+                        Console.WriteLine($"Surowe dane: {BitConverter.ToString(response)}");
                         break;
                 }
             }
@@ -484,7 +617,7 @@ namespace FISApiClient
                     
                     // H0 - Chaining
                     var chaining = responseData[position];
-                    Console.WriteLine($"Chaining: {chaining} ({(chaining == '0' ? "Ostatnia" : "Dalsze dane")})");
+                    Console.WriteLine($"Chaining: {chaining}");
                     position++;
                     
                     // H1 - Number of GLID
@@ -498,7 +631,6 @@ namespace FISApiClient
                     {
                         Console.WriteLine($"\n--- GLID {glidIndex + 1} ---");
                         
-                        // Przetwarzanie 5 pól dla każdego GLID
                         for (int fieldIndex = 0; fieldIndex < 5; fieldIndex++)
                         {
                             if (position >= responseData.Length)
@@ -550,12 +682,6 @@ namespace FISApiClient
             }
         }
 
-        private void ProcessDictionaryUpdateResponse(byte[] response, int stxPos)
-        {
-            Console.WriteLine("=== AKTUALIZACJA DICTIONARY ===");
-            // Implementacja podobna do ProcessDictionaryResponse
-        }
-
         private void ProcessUnknownStockCode(byte[] response, int stxPos)
         {
             Console.WriteLine("=== NIEZNANY KOD AKCJI ===");
@@ -593,18 +719,23 @@ namespace FISApiClient
         }
     }
 
-    // Program główny
     class Program
     {
         static async Task Main(string[] args)
         {
             var client = new FISApiClient(
-                host: "10.251.224.201",
-                port: 29593,
+                host: "172.31.136.4",
+                port: 25003,
                 user: "401",
                 password: "glglgl",
-                node: "9592",
-                subnode: "19592"
+                node: "5500",
+                subnode: "4500"
+                // host: "10.251.224.201",
+                // port: 29593,
+                // user: "401",
+                // password: "glglgl",
+                // node: "9592",
+                // subnode: "19592"
             );
 
             try
@@ -615,14 +746,11 @@ namespace FISApiClient
                 {
                     Console.WriteLine("Połączenie nawiązane pomyślnie!");
                     
-                    // Krótka pauza przed wysłaniem Dictionary
                     await Task.Delay(1000);
                     
-                    // Automatyczne pobranie listy symboli
                     Console.WriteLine("Pobieranie listy dostępnych symboli...");
                     await client.SendDictionaryRequest();
                     
-                    // Więcej czasu na odpowiedź
                     await client.WaitForResponse(15000);
                     
                     Console.WriteLine("\nDostępne komendy:");
@@ -650,13 +778,9 @@ namespace FISApiClient
                         }
                         else if (!string.IsNullOrEmpty(input))
                         {
-                            Console.WriteLine("Nieznana komenda. Dostępne komendy: dict, test, quit");
+                            Console.WriteLine("Nieznana komenda.");
                         }
                     }
-                }
-                else
-                {
-                    Console.WriteLine("Nie udało się nawiązać połączenia.");
                 }
             }
             catch (Exception ex)
