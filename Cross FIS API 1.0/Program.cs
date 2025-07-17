@@ -730,12 +730,6 @@ namespace FISApiClient
                 password: "glglgl",
                 node: "5500",
                 subnode: "4500"
-                // host: "10.251.224.201",
-                // port: 29593,
-                // user: "401",
-                // password: "glglgl",
-                // node: "9592",
-                // subnode: "19592"
             );
 
             try
