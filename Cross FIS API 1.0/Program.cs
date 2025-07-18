@@ -7,6 +7,40 @@ using System.Threading.Tasks;
 
 namespace FISApiClient
 {
+    public enum Exchange
+    {
+        WSE = 40,    // Warsaw Stock Exchange
+        SMTF = 330,  // SMTF
+        BSRM = 331,  // BSRM
+        BSMTF = 332  // BSMTF
+    }
+
+    public enum Market
+    {
+        Bonds = 1,
+        Cash = 2,
+        Options = 3,
+        Future = 4,
+        Index = 5,
+        OPCVM = 9,
+        Growth = 16,
+        FutureIndices = 17,
+        Warrants = 20
+    }
+
+    public class ExchangeConfig
+    {
+        public Exchange Exchange { get; set; }
+        public Market Market { get; set; }
+        public string Name { get; set; }
+        public string Description { get; set; }
+
+        public string GetGLID()
+        {
+            return $"{(int)Exchange:D4}00{(int)Market:D3}000";
+        }
+    }
+
     public class FISApiClient
     {
         private TcpClient tcpClient;
@@ -17,15 +51,26 @@ namespace FISApiClient
         private readonly string password;
         private readonly string node;
         private readonly string subnode;
-        private string callingId; // Usun??em readonly - b?dzie aktualizowane
+        private string callingId;
 
-        // Sta?e protoko?u
+        // Stałe protokołu
         private const byte STX = 2;
         private const byte ETX = 3;
         private const int HEADER_LENGTH = 32;
         private const int FOOTER_LENGTH = 3;
         private const int LG_LENGTH = 2;
         private const int CLIENT_ID_LENGTH = 16;
+
+        // Dostępne konfiguracje giełd
+        private static readonly List<ExchangeConfig> AvailableExchanges = new List<ExchangeConfig>
+        {
+            new ExchangeConfig { Exchange = Exchange.WSE, Market = Market.Cash, Name = "WSE Cash", Description = "Warsaw Stock Exchange - Cash Market" },
+            new ExchangeConfig { Exchange = Exchange.WSE, Market = Market.Options, Name = "WSE Options", Description = "Warsaw Stock Exchange - Options Market" },
+            new ExchangeConfig { Exchange = Exchange.WSE, Market = Market.Future, Name = "WSE Future", Description = "Warsaw Stock Exchange - Future Market" },
+            new ExchangeConfig { Exchange = Exchange.SMTF, Market = Market.Cash, Name = "SMTF Cash", Description = "SMTF - Cash Market" },
+            new ExchangeConfig { Exchange = Exchange.BSRM, Market = Market.Cash, Name = "BSRM Cash", Description = "BSRM - Cash Market" },
+            new ExchangeConfig { Exchange = Exchange.BSMTF, Market = Market.Cash, Name = "BSMTF Cash", Description = "BSMTF - Cash Market" }
+        };
 
         public FISApiClient(string host, int port, string user, string password, string node, string subnode)
         {
@@ -35,7 +80,7 @@ namespace FISApiClient
             this.password = password;
             this.node = node;
             this.subnode = subnode;
-            this.callingId = "00000"; // Domy?lny calling ID
+            this.callingId = "00000";
         }
 
         public async Task<bool> ConnectAsync()
@@ -74,7 +119,7 @@ namespace FISApiClient
         {
             var message = BuildLogicalConnectionMessage();
             await stream.WriteAsync(message, 0, message.Length);
-            Console.WriteLine($"??danie logicznego połączenia (1100) wysłane. Rozmiar: {message.Length} bajtów");
+            Console.WriteLine($"Żądanie logicznego połączenia (1100) wysłane. Rozmiar: {message.Length} bajtów");
         }
 
         private byte[] BuildLogicalConnectionMessage()
@@ -103,11 +148,11 @@ namespace FISApiClient
             var message = new byte[totalLength];
             var offset = 0;
 
-            // D?ugo?? wiadomo?ci
+            // Długość wiadomości
             message[offset++] = (byte)(totalLength % 256);
             message[offset++] = (byte)(totalLength / 256);
 
-            // Nag?ówek
+            // Nagłówek
             BuildHeader(message, ref offset, data.Length, 1100);
 
             // Dane
@@ -211,31 +256,13 @@ namespace FISApiClient
 
             Console.WriteLine($"STX znaleziony na pozycji: {stxPos}");
 
-            // DEBUG: Wy?wietl ca?y nag?ówek
+            // Odczytanie nagłówka
             if (stxPos + 32 <= response.Length)
             {
-                var headerBytes = new byte[32];
-                Array.Copy(response, stxPos, headerBytes, 0, 32);
-                Console.WriteLine($"Nagłówek HEX: {BitConverter.ToString(headerBytes)}");
-            }
-
-            // Odczytanie nag?ówka
-            if (stxPos + 32 <= response.Length)
-            {
-                var apiVersion = (char)response[stxPos + 1];
-                var requestSizeStr = Encoding.ASCII.GetString(response, stxPos + 2, 5);
                 var calledIdStr = Encoding.ASCII.GetString(response, stxPos + 7, 5);
-                var newCallingIdStr = Encoding.ASCII.GetString(response, stxPos + 17, 5);
                 var requestNumberStr = Encoding.ASCII.GetString(response, stxPos + 24, 5);
-
-                
                 
                 callingId = calledIdStr.Trim();
-                
-
-                
-                
-                
 
                 if (int.TryParse(requestNumberStr, out int requestNumber))
                 {
@@ -245,10 +272,6 @@ namespace FISApiClient
                     {
                         Console.WriteLine("Połączenie logiczne nawiązane pomyślnie!");
                         Console.WriteLine($"Używany Calling ID: '{callingId}'");
-                        
-                        // Sprawd? dane odpowiedzi
-                        CheckResponseDataForCallingId(response, stxPos);
-                        
                         return true;
                     }
                     else if (requestNumber == 1102)
@@ -264,115 +287,9 @@ namespace FISApiClient
             return false;
         }
 
-        private void CheckResponseDataForCallingId(byte[] response, int stxPos)
-        {
-            try
-            {
-                Console.WriteLine("=== SPRAWDZANIE DANYCH ODPOWIEDZI 1100 ===");
-                
-                var dataStart = stxPos + 32;
-                var dataEnd = response.Length - FOOTER_LENGTH;
-                
-                if (dataStart < dataEnd)
-                {
-                    var responseData = new byte[dataEnd - dataStart];
-                    Array.Copy(response, dataStart, responseData, 0, responseData.Length);
-                    
-                    Console.WriteLine($"Dane odpowiedzi 1100 (HEX): {BitConverter.ToString(responseData)}");
-                    Console.WriteLine($"Dane odpowiedzi 1100 (ASCII): {Encoding.ASCII.GetString(responseData)}");
-                    
-                    var position = 0;
-                    
-                    // User Number (3 bajty)
-                    if (position + 3 <= responseData.Length)
-                    {
-                        var userNum = Encoding.ASCII.GetString(responseData, position, 3);
-                        Console.WriteLine($"User Number w odpowiedzi: '{userNum}'");
-                        position += 3;
-                    }
-                    
-                    // Password (16 bajtów)
-                    if (position + 16 <= responseData.Length)
-                    {
-                        var pass = Encoding.ASCII.GetString(responseData, position, 16);
-                        Console.WriteLine($"Password w odpowiedzi: '{pass}'");
-                        position += 16;
-                    }
-                    
-                    // Reason (1 bajt)
-                    if (position < responseData.Length)
-                    {
-                        var reason = responseData[position] - 32;
-                        Console.WriteLine($"Reason w odpowiedzi: {reason}");
-                        position += 1;
-                    }
-                    
-                    // Key/Value pary
-                    Console.WriteLine("Sprawdzanie Key/Value par w odpowiedzi:");
-                    while (position < responseData.Length - 3)
-                    {
-                        var (key, value) = DecodeField(responseData, ref position);
-                        if (key != null && value != null)
-                        {
-                            Console.WriteLine($"  Key '{key}' = '{value}'");
-                            
-                            if (key == "26" || key == "15" || value.Contains("20026"))
-                            {
-                                Console.WriteLine($"    *** POTENCJALNE CALLING ID: {value} ***");
-                            }
-                        }
-                        else
-                        {
-                            break;
-                        }
-                    }
-                }
-                else
-                {
-                    Console.WriteLine("Brak danych w odpowiedzi 1100");
-                }
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"B??d podczas sprawdzania danych odpowiedzi: {ex.Message}");
-            }
-        }
-
-        private (string key, string value) DecodeField(byte[] data, ref int position)
-        {
-            if (position >= data.Length)
-                return (null, null);
-
-            try
-            {
-                var keyLength = data[position] - 32;
-                if (keyLength <= 0 || position + 1 + keyLength > data.Length)
-                    return (null, null);
-
-                var key = Encoding.ASCII.GetString(data, position + 1, keyLength);
-                position += 1 + keyLength;
-
-                if (position >= data.Length)
-                    return (key, null);
-
-                var valueLength = data[position] - 32;
-                if (valueLength <= 0 || position + 1 + valueLength > data.Length)
-                    return (key, null);
-
-                var value = Encoding.ASCII.GetString(data, position + 1, valueLength);
-                position += 1 + valueLength;
-
-                return (key, value);
-            }
-            catch
-            {
-                return (null, null);
-            }
-        }
-
         private void ProcessConnectionError(byte[] response)
         {
-            Console.WriteLine("Szczegó?y b??du po??czenia:");
+            Console.WriteLine("Szczegóły błędu połączenia:");
             
             var stxPos = -1;
             for (int i = 0; i < response.Length; i++)
@@ -409,7 +326,7 @@ namespace FISApiClient
                             {
                                 case 0: Console.WriteLine("Nieprawidłowe hasło"); break;
                                 case 1: Console.WriteLine("Brak miejsca w bazie połączeń logicznych"); break;
-                                case 2: Console.WriteLine("Nieprawid?owy format żądania połączenia"); break;
+                                case 2: Console.WriteLine("Nieprawidłowy format żądania połączenia"); break;
                                 case 3: Console.WriteLine("Zabroniony numer użytkownika"); break;
                                 case 4: Console.WriteLine("Nieznany numer użytkownika"); break;
                                 case 7: Console.WriteLine("Użytkownik już połączony"); break;
@@ -427,7 +344,18 @@ namespace FISApiClient
             }
         }
 
-        public async Task SendDictionaryRequest()
+        public void ShowAvailableExchanges()
+        {
+            Console.WriteLine("\n=== DOSTĘPNE GIEŁDY ===");
+            for (int i = 0; i < AvailableExchanges.Count; i++)
+            {
+                var exchange = AvailableExchanges[i];
+                Console.WriteLine($"{i + 1}. {exchange.Name} - {exchange.Description}");
+                Console.WriteLine($"   GLID: {exchange.GetGLID()}");
+            }
+        }
+
+        public async Task SendDictionaryRequest(int exchangeIndex = 0)
         {
             if (stream == null)
             {
@@ -435,28 +363,122 @@ namespace FISApiClient
                 return;
             }
 
-            Console.WriteLine($"Wysyłanie żądania Dictionary z Calling ID: '{callingId}'");
+            if (exchangeIndex < 0 || exchangeIndex >= AvailableExchanges.Count)
+            {
+                Console.WriteLine("Nieprawidłowy indeks giełdy!");
+                return;
+            }
+
+            var selectedExchange = AvailableExchanges[exchangeIndex];
+            Console.WriteLine($"Wysyłanie żądania Dictionary dla: {selectedExchange.Name}");
+            Console.WriteLine($"Calling ID: '{callingId}', GLID: {selectedExchange.GetGLID()}");
             
-            var message = BuildDictionaryMessage();
+            var message = BuildDictionaryMessage(selectedExchange.GetGLID());
             await stream.WriteAsync(message, 0, message.Length);
             
             Console.WriteLine($"Żądanie Dictionary wysłane. Rozmiar: {message.Length} bajtów");
         }
 
-        private byte[] BuildDictionaryMessage()
+        private bool lastResponseHadInstruments = false;
+
+        public async Task SendDictionaryRequestAll()
+        {
+            if (stream == null)
+            {
+                Console.WriteLine("Brak połączenia!");
+                return;
+            }
+
+            var exchanges = new[] { 40, 330, 331, 332 };
+            var totalRequests = 0;
+            var successfulRequests = 0;
+            var marketsWithInstruments = new List<string>();
+
+            Console.WriteLine("=== POBIERANIE DICTIONARY DLA WSZYSTKICH GIEŁD I RYNKÓW ===");
+            
+            foreach (var exchange in exchanges)
+            {
+                var exchangeName = GetExchangeName(exchange);
+                Console.WriteLine($"\n--- {exchangeName} (Exchange {exchange}) ---");
+                
+                for (int market = 1; market <= 20; market++)
+                {
+                    var glid = $"{exchange:D4}00{market:D3}000";
+                    
+                    Console.Write($"Sprawdzanie {exchangeName} rynek {market:D2} (GLID: {glid})... ");
+                    
+                    try
+                    {
+                        lastResponseHadInstruments = false;
+                        
+                        var message = BuildDictionaryMessage(glid);
+                        await stream.WriteAsync(message, 0, message.Length);
+                        totalRequests++;
+                        
+                        // Czekamy na odpowiedź z krótszym timeoutem
+                        if (await WaitForResponse(2000))
+                        {
+                            successfulRequests++;
+                            if (lastResponseHadInstruments)
+                            {
+                                marketsWithInstruments.Add($"{exchangeName} rynek {market}");
+                            }
+                        }
+                        else
+                        {
+                            Console.WriteLine("Timeout");
+                        }
+                        
+                        // Małe opóźnienie między żądaniami
+                        await Task.Delay(50);
+                    }
+                    catch (Exception ex)
+                    {
+                        Console.WriteLine($"Błąd: {ex.Message}");
+                    }
+                }
+            }
+            
+            Console.WriteLine($"\n=== PODSUMOWANIE ===");
+            Console.WriteLine($"Wysłano żądań: {totalRequests}");
+            Console.WriteLine($"Otrzymano odpowiedzi: {successfulRequests}");
+            Console.WriteLine($"Nie odpowiedziały: {totalRequests - successfulRequests}");
+            
+            if (marketsWithInstruments.Count > 0)
+            {
+                Console.WriteLine($"\nRynki z instrumentami ({marketsWithInstruments.Count}):");
+                foreach (var market in marketsWithInstruments)
+                {
+                    Console.WriteLine($"  - {market}");
+                }
+            }
+            else
+            {
+                Console.WriteLine("\nBrak rynków z instrumentami");
+            }
+        }
+
+        private string GetExchangeName(int exchange)
+        {
+            return exchange switch
+            {
+                40 => "WSE",
+                330 => "SMTF",
+                331 => "BSRM",
+                332 => "BSMTF",
+                _ => $"Exchange_{exchange}"
+            };
+        }
+
+        private byte[] BuildDictionaryMessage(string glid)
         {
             var dataBuilder = new List<byte>();
 
             // H0 - Number of GLID
             dataBuilder.AddRange(Encoding.ASCII.GetBytes("00001"));
 
-            // H1 - GLID dla WSE Cash market
-            var wseCashGlid = "004000002000";
-            
-            Console.WriteLine($"Używany GLID: {wseCashGlid}");
-            Console.WriteLine($"Używany Calling ID: '{callingId}'");
-            
-            dataBuilder.AddRange(EncodeField(wseCashGlid));
+            // H1 - GLID
+            dataBuilder.AddRange(EncodeField(glid));
 
             var data = dataBuilder.ToArray();
             
@@ -464,11 +486,11 @@ namespace FISApiClient
             var message = new byte[totalLength];
             var offset = 0;
 
-            // D?ugo?? wiadomo?ci
+            // Długość wiadomości
             message[offset++] = (byte)(totalLength % 256);
             message[offset++] = (byte)(totalLength / 256);
 
-            // Nag?ówek
+            // Nagłówek
             BuildHeader(message, ref offset, data.Length, 5108);
 
             // Dane
@@ -484,6 +506,25 @@ namespace FISApiClient
         }
 
         public async Task<bool> WaitForResponse(int timeoutMs = 5000)
+        {
+            if (stream == null) return false;
+
+            var startTime = DateTime.Now;
+            while ((DateTime.Now - startTime).TotalMilliseconds < timeoutMs)
+            {
+                if (stream.DataAvailable)
+                {
+                    var response = await ReceiveResponse();
+                    await ProcessIncomingMessage(response);
+                    return true;
+                }
+                await Task.Delay(50);
+            }
+            
+            return false; // Usunięto komunikat timeout dla dict all
+        }
+
+        public async Task<bool> WaitForResponseWithTimeout(int timeoutMs = 5000)
         {
             if (stream == null) return false;
 
@@ -530,19 +571,17 @@ namespace FISApiClient
             var requestNumberStr = Encoding.ASCII.GetString(response, stxPos + 24, 5);
             if (int.TryParse(requestNumberStr, out int requestNumber))
             {
-                Console.WriteLine($"Otrzymano wiadomość typu: {requestNumber}");
-                
                 switch (requestNumber)
                 {
                     case 1044:
-                        ProcessUnknownStockCode(response, stxPos);
+                        Console.WriteLine("Brak instrumentów");
+                        lastResponseHadInstruments = false;
                         break;
                     case 5108:
                         ProcessDictionaryResponse(response, stxPos);
                         break;
                     default:
                         Console.WriteLine($"Nieobsługiwany typ wiadomości: {requestNumber}");
-                        Console.WriteLine($"Surowe dane: {BitConverter.ToString(response)}");
                         break;
                 }
             }
@@ -550,8 +589,6 @@ namespace FISApiClient
 
         private void ProcessDictionaryResponse(byte[] response, int stxPos)
         {
-            Console.WriteLine("=== ODPOWIEDŹ DICTIONARY ===");
-            
             try
             {
                 var dataStart = stxPos + 32;
@@ -566,19 +603,28 @@ namespace FISApiClient
                     
                     // H0 - Chaining
                     var chaining = responseData[position];
-                    Console.WriteLine($"Chaining: {chaining}");
                     position++;
                     
                     // H1 - Number of GLID
                     var numberOfGlidStr = Encoding.ASCII.GetString(responseData, position, 5);
                     var numberOfGlid = int.Parse(numberOfGlidStr);
-                    Console.WriteLine($"Liczba GLID: {numberOfGlid}");
                     position += 5;
                     
-                    // Przetwarzanie ka?dego GLID
-                    for (int glidIndex = 0; glidIndex < numberOfGlid; glidIndex++)
+                    // Jeśli brak instrumentów, wyświetl krótką informację
+                    if (numberOfGlid == 0)
                     {
-                        Console.WriteLine($"\n--- GLID {glidIndex + 1} ---");
+                        Console.WriteLine("Brak instrumentów");
+                        lastResponseHadInstruments = false;
+                        return;
+                    }
+                    
+                    Console.WriteLine($"✓ Znaleziono {numberOfGlid} instrumentów");
+                    lastResponseHadInstruments = true;
+                    
+                    // Przetwarzanie każdego GLID - pokazuj szczegóły tylko dla pierwszych 3
+                    for (int glidIndex = 0; glidIndex < Math.Min(numberOfGlid, 3); glidIndex++)
+                    {
+                        Console.WriteLine($"  Instrument {glidIndex + 1}:");
                         
                         for (int fieldIndex = 0; fieldIndex < 5; fieldIndex++)
                         {
@@ -593,24 +639,17 @@ namespace FISApiClient
                                 switch (fieldIndex)
                                 {
                                     case 0:
-                                        Console.WriteLine($"  GLID + Stockcode: {fieldValue}");
                                         if (fieldValue.Length > 12)
                                         {
                                             var symbol = fieldValue.Substring(12);
-                                            Console.WriteLine($"  Symbol: {symbol}");
+                                            Console.WriteLine($"    Symbol: {symbol}");
                                         }
                                         break;
                                     case 1:
-                                        Console.WriteLine($"  Stock name: {fieldValue}");
-                                        break;
-                                    case 2:
-                                        Console.WriteLine($"  Local code: {fieldValue}");
+                                        Console.WriteLine($"    Nazwa: {fieldValue}");
                                         break;
                                     case 3:
-                                        Console.WriteLine($"  ISIN code: {fieldValue}");
-                                        break;
-                                    case 4:
-                                        Console.WriteLine($"  Quotation group: {fieldValue}");
+                                        Console.WriteLine($"    ISIN: {fieldValue}");
                                         break;
                                 }
                                 
@@ -618,16 +657,22 @@ namespace FISApiClient
                             }
                             else
                             {
-                                Console.WriteLine($"  Pole {fieldIndex}: Błąd dekodowania");
                                 break;
                             }
                         }
+                    }
+                    
+                    // Przeskocz pozostałe instrumenty jeśli ich więcej niż 3
+                    if (numberOfGlid > 3)
+                    {
+                        Console.WriteLine($"  ... i {numberOfGlid - 3} więcej instrumentów");
                     }
                 }
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"Błąd podczas przetwarzania Dictionary: {ex.Message}");
+                Console.WriteLine($"Błąd: {ex.Message}");
+                lastResponseHadInstruments = false;
             }
         }
 
@@ -679,12 +724,6 @@ namespace FISApiClient
                 password: "glglgl",
                 node: "5000",
                 subnode: "4000"
-                // host: "10.251.224.201",
-                // port: 61593,
-                // user: "401",
-                // password: "glglgl",
-                // node: "9595",
-                // subnode: "19595"
             );
 
             try
@@ -697,13 +736,13 @@ namespace FISApiClient
                     
                     await Task.Delay(1000);
                     
-                    Console.WriteLine("Pobieranie listy dostępnych symboli...");
-                    await client.SendDictionaryRequest();
-                    
-                    await client.WaitForResponse(15000);
+                    // Pokaż dostępne giełdy
+                    client.ShowAvailableExchanges();
                     
                     Console.WriteLine("\nDostępne komendy:");
-                    Console.WriteLine("  dict - żądanie Dictionary");
+                    Console.WriteLine("  exchanges - pokaż dostępne giełdy");
+                    Console.WriteLine("  dict <numer> - żądanie Dictionary dla wybranej giełdy (np. dict 1)");
+                    Console.WriteLine("  dict all - żądanie Dictionary dla wszystkich giełd i rynków (1-20)");
                     Console.WriteLine("  test - test połączenia");
                     Console.WriteLine("  quit - zakończenie");
                     
@@ -716,10 +755,35 @@ namespace FISApiClient
                         {
                             break;
                         }
-                        else if (input?.ToLower() == "dict")
+                        else if (input?.ToLower() == "exchanges")
                         {
-                            await client.SendDictionaryRequest();
-                            await client.WaitForResponse(10000);
+                            client.ShowAvailableExchanges();
+                        }
+                        else if (input?.ToLower().StartsWith("dict") == true)
+                        {
+                            var parts = input.Split(' ');
+                            if (parts.Length > 1)
+                            {
+                                if (parts[1].ToLower() == "all")
+                                {
+                                    await client.SendDictionaryRequestAll();
+                                }
+                                else if (int.TryParse(parts[1], out int exchangeIndex))
+                                {
+                                    await client.SendDictionaryRequest(exchangeIndex - 1); // -1 bo indeks od 0
+                                    await client.WaitForResponseWithTimeout(10000);
+                                }
+                                else
+                                {
+                                    Console.WriteLine("Użyj: dict <numer giełdy> lub dict all");
+                                    client.ShowAvailableExchanges();
+                                }
+                            }
+                            else
+                            {
+                                Console.WriteLine("Użyj: dict <numer giełdy> lub dict all");
+                                client.ShowAvailableExchanges();
+                            }
                         }
                         else if (input?.ToLower() == "test")
                         {
