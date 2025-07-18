@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Net.Sockets;
@@ -17,9 +17,9 @@ namespace FISApiClient
         private readonly string password;
         private readonly string node;
         private readonly string subnode;
-        private string callingId; // Usunąłem readonly - będzie aktualizowane
+        private string callingId; // Usun??em readonly - b?dzie aktualizowane
 
-        // Stałe protokołu
+        // Sta?e protoko?u
         private const byte STX = 2;
         private const byte ETX = 3;
         private const int HEADER_LENGTH = 32;
@@ -35,7 +35,7 @@ namespace FISApiClient
             this.password = password;
             this.node = node;
             this.subnode = subnode;
-            this.callingId = "00000"; // Domyślny calling ID
+            this.callingId = "00000"; // Domy?lny calling ID
         }
 
         public async Task<bool> ConnectAsync()
@@ -74,7 +74,7 @@ namespace FISApiClient
         {
             var message = BuildLogicalConnectionMessage();
             await stream.WriteAsync(message, 0, message.Length);
-            Console.WriteLine($"Żądanie logicznego połączenia (1100) wysłane. Rozmiar: {message.Length} bajtów");
+            Console.WriteLine($"??danie logicznego połączenia (1100) wysłane. Rozmiar: {message.Length} bajtów");
         }
 
         private byte[] BuildLogicalConnectionMessage()
@@ -103,11 +103,11 @@ namespace FISApiClient
             var message = new byte[totalLength];
             var offset = 0;
 
-            // Długość wiadomości
+            // D?ugo?? wiadomo?ci
             message[offset++] = (byte)(totalLength % 256);
             message[offset++] = (byte)(totalLength / 256);
 
-            // Nagłówek
+            // Nag?ówek
             BuildHeader(message, ref offset, data.Length, 1100);
 
             // Dane
@@ -211,7 +211,7 @@ namespace FISApiClient
 
             Console.WriteLine($"STX znaleziony na pozycji: {stxPos}");
 
-            // DEBUG: Wyświetl cały nagłówek
+            // DEBUG: Wy?wietl ca?y nag?ówek
             if (stxPos + 32 <= response.Length)
             {
                 var headerBytes = new byte[32];
@@ -219,7 +219,7 @@ namespace FISApiClient
                 Console.WriteLine($"Nagłówek HEX: {BitConverter.ToString(headerBytes)}");
             }
 
-            // Odczytanie nagłówka
+            // Odczytanie nag?ówka
             if (stxPos + 32 <= response.Length)
             {
                 var apiVersion = (char)response[stxPos + 1];
@@ -228,65 +228,14 @@ namespace FISApiClient
                 var newCallingIdStr = Encoding.ASCII.GetString(response, stxPos + 17, 5);
                 var requestNumberStr = Encoding.ASCII.GetString(response, stxPos + 24, 5);
 
-                Console.WriteLine($"API Version: {apiVersion}");
-                Console.WriteLine($"Request Size: {requestSizeStr}");
-                Console.WriteLine($"Called ID: '{calledIdStr}'");
-                Console.WriteLine($"Calling ID z serwera (RAW): '{newCallingIdStr}'");
-                Console.WriteLine($"Request Number: {requestNumberStr}");
-
-                // DEBUG: Wyświetl bajty Calling ID
-                var callingIdBytes = new byte[5];
-                Array.Copy(response, stxPos + 17, callingIdBytes, 0, 5);
-                Console.WriteLine($"Calling ID bytes: {BitConverter.ToString(callingIdBytes)}");
-                Console.WriteLine($"Calling ID ASCII: {string.Join(",", callingIdBytes.Select(b => $"'{(char)b}'({b})"))}");
-
-                // Alternatywne sprawdzenie Called ID
-                Console.WriteLine($"ALTERNATYWNE: Called ID jako potencjalne Calling ID: '{calledIdStr.Trim()}'");
-
-                // Sprawdź które pole zawiera nowe ID
-                var trimmedCallingId = newCallingIdStr.Trim();
-                var alternativeCallingId = calledIdStr.Trim();
-                string potentialNewCallingId = null;
                 
-                if (!string.IsNullOrWhiteSpace(trimmedCallingId) && 
-                    trimmedCallingId != "00000" && 
-                    trimmedCallingId != "0" &&
-                    trimmedCallingId != subnode && 
-                    trimmedCallingId.All(char.IsDigit))
-                {
-                    potentialNewCallingId = trimmedCallingId;
-                    Console.WriteLine($"✅ Znaleziono nowe Calling ID w pozycji standardowej: '{potentialNewCallingId}'");
-                }
-                else if (!string.IsNullOrWhiteSpace(alternativeCallingId) && 
-                         alternativeCallingId != "00000" && 
-                         alternativeCallingId != "0" &&
-                         alternativeCallingId != subnode && 
-                         alternativeCallingId.All(char.IsDigit))
-                {
-                    potentialNewCallingId = alternativeCallingId;
-                    Console.WriteLine($"✅ Znaleziono nowe Calling ID w pozycji Called ID: '{potentialNewCallingId}'");
-                }
                 
-                if (potentialNewCallingId != null)
-                {
-                    callingId = potentialNewCallingId.PadLeft(5, '0');
-                    Console.WriteLine($"✅ Zaktualizowano Calling ID na: '{callingId}'");
-                }
-                else
-                {
-                    Console.WriteLine($"❌ Nie znaleziono nowego Calling ID w odpowiedzi serwera");
-                    
-                    // OSTATECZNE PODEJŚCIE: Oblicz na podstawie wzorca z logów
-                    var nodeNumber = int.Parse(node);
-                    var subnodeNumber = int.Parse(subnode);
-                    var calculatedCallingId = (subnodeNumber + 434).ToString().PadLeft(5, '0');
-                    
-                    Console.WriteLine($"⚠️  EKSPERYMENTALNE: Próba obliczenia Calling ID: '{calculatedCallingId}'");
-                    Console.WriteLine($"⚠️  Wzór: subnode({subnode}) + 434 = {calculatedCallingId}");
-                    
-                    callingId = calculatedCallingId;
-                    Console.WriteLine($"✅ Używam obliczonego Calling ID: '{callingId}'");
-                }
+                callingId = calledIdStr.Trim();
+                
+
+                
+                
+                
 
                 if (int.TryParse(requestNumberStr, out int requestNumber))
                 {
@@ -297,7 +246,7 @@ namespace FISApiClient
                         Console.WriteLine("Połączenie logiczne nawiązane pomyślnie!");
                         Console.WriteLine($"Używany Calling ID: '{callingId}'");
                         
-                        // Sprawdź dane odpowiedzi
+                        // Sprawd? dane odpowiedzi
                         CheckResponseDataForCallingId(response, stxPos);
                         
                         return true;
@@ -385,7 +334,7 @@ namespace FISApiClient
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"Błąd podczas sprawdzania danych odpowiedzi: {ex.Message}");
+                Console.WriteLine($"B??d podczas sprawdzania danych odpowiedzi: {ex.Message}");
             }
         }
 
@@ -423,7 +372,7 @@ namespace FISApiClient
 
         private void ProcessConnectionError(byte[] response)
         {
-            Console.WriteLine("Szczegóły błędu połączenia:");
+            Console.WriteLine("Szczegó?y b??du po??czenia:");
             
             var stxPos = -1;
             for (int i = 0; i < response.Length; i++)
@@ -460,7 +409,7 @@ namespace FISApiClient
                             {
                                 case 0: Console.WriteLine("Nieprawidłowe hasło"); break;
                                 case 1: Console.WriteLine("Brak miejsca w bazie połączeń logicznych"); break;
-                                case 2: Console.WriteLine("Nieprawidłowy format żądania połączenia"); break;
+                                case 2: Console.WriteLine("Nieprawid?owy format żądania połączenia"); break;
                                 case 3: Console.WriteLine("Zabroniony numer użytkownika"); break;
                                 case 4: Console.WriteLine("Nieznany numer użytkownika"); break;
                                 case 7: Console.WriteLine("Użytkownik już połączony"); break;
@@ -515,11 +464,11 @@ namespace FISApiClient
             var message = new byte[totalLength];
             var offset = 0;
 
-            // Długość wiadomości
+            // D?ugo?? wiadomo?ci
             message[offset++] = (byte)(totalLength % 256);
             message[offset++] = (byte)(totalLength / 256);
 
-            // Nagłówek
+            // Nag?ówek
             BuildHeader(message, ref offset, data.Length, 5108);
 
             // Dane
@@ -626,7 +575,7 @@ namespace FISApiClient
                     Console.WriteLine($"Liczba GLID: {numberOfGlid}");
                     position += 5;
                     
-                    // Przetwarzanie każdego GLID
+                    // Przetwarzanie ka?dego GLID
                     for (int glidIndex = 0; glidIndex < numberOfGlid; glidIndex++)
                     {
                         Console.WriteLine($"\n--- GLID {glidIndex + 1} ---");
@@ -728,8 +677,14 @@ namespace FISApiClient
                 port: 25003,
                 user: "401",
                 password: "glglgl",
-                node: "5500",
-                subnode: "4500"
+                node: "5000",
+                subnode: "4000"
+                // host: "10.251.224.201",
+                // port: 61593,
+                // user: "401",
+                // password: "glglgl",
+                // node: "9595",
+                // subnode: "19595"
             );
 
             try
