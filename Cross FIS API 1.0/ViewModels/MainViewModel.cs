@@ -22,7 +22,7 @@ namespace Cross_FIS_API_1._0.ViewModels
 
         public MainViewModel()
         {
-            _fisApiClient = new FISApiClient("172.31.136.4", 25003, "401", "glglgl", "5000", "4000");
+            _fisApiClient = new FISApiClient("172.31.136.4", 19593, "103", "glglgl", "24300", "14300");
             _fisApiClient.LogMessage += (msg) => App.Current.Dispatcher.Invoke(() => Logs.Add(msg));
             _fisApiClient.ConnectionStatusChanged += (status) =>
             {

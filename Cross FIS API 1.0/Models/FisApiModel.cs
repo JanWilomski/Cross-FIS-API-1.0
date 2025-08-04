@@ -438,8 +438,26 @@ namespace Cross_FIS_API_1._0.Models
         private async Task SendRealTimeRepliesRequest()
         {
             LogMessage?.Invoke("Wysyłanie żądania subskrypcji odpowiedzi (2017).");
-            var message = BuildMessage(new byte[0], 2017);
+    
+            var dataBuilder = new List<byte>();
+    
+            // Flagi subskrypcji (7 bajtów) - określają które typy wiadomości chcemy otrzymywać
+            dataBuilder.Add((byte)'1'); // ACK - potwierdzenia
+            dataBuilder.Add((byte)'1'); // REJECT - odrzucenia  
+            dataBuilder.Add((byte)'1'); // EXCHANGE REJECT - odrzucenia giełdowe
+            dataBuilder.Add((byte)'0'); // TRADE EXECUTION - realizacje (0 = nie chcemy)
+            dataBuilder.Add((byte)'0'); // EXCHANGE MESSAGE - wiadomości giełdowe (0 = nie chcemy)
+            dataBuilder.Add((byte)'0'); // DEFAULT - domyślne (0 = nie chcemy)
+            dataBuilder.Add((byte)'0'); // INFLECTED MESSAGE - inne (0 = nie chcemy)
+    
+            // 11 bajtów fillera (spacje)
+            dataBuilder.AddRange(Encoding.ASCII.GetBytes("           ")); // 11 spacji
+    
+            var data = dataBuilder.ToArray();
+            var message = BuildMessage(data, 2017);
+    
             await stream.WriteAsync(message, 0, message.Length);
+            LogMessage?.Invoke($"Żądanie subskrypcji 2017 wysłane ({data.Length} bajtów danych).");
         }
 
         private void ProcessRealTimeRepliesConfirmation(byte[] response, int stxPos)
