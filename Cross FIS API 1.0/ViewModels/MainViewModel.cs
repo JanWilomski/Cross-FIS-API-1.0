@@ -1,6 +1,8 @@
 using Cross_FIS_API_1._0.Models;
+using Cross_FIS_API_1._0.Views;
 using System.Collections.ObjectModel;
 using System.ComponentModel;
+using System.Linq;
 using System.Runtime.CompilerServices;
 using System.Threading.Tasks;
 using System.Windows.Input;
@@ -14,7 +16,9 @@ namespace Cross_FIS_API_1._0.ViewModels
         private string _status;
         private ObservableCollection<string> _logs;
         private ExchangeConfig _selectedExchange;
-        private ObservableCollection<Instrument> _instruments;
+        private readonly ObservableCollection<Instrument> _allInstruments;
+        private Instrument _selectedInstrument;
+        private InstrumentDetailViewModel _selectedDetail;
 
         public MainViewModel()
         {
@@ -31,15 +35,22 @@ namespace Cross_FIS_API_1._0.ViewModels
             {
                 App.Current.Dispatcher.Invoke(() =>
                 {
-                    foreach (var i in instruments)
+                    foreach (var instrument in instruments)
                     {
-                        Instruments.Add(i);
+                        _allInstruments.Add(instrument);
+                        if (!instrument.Symbol.Contains("_"))
+                        {
+                            DisplayInstruments.Add(instrument);
+                        }
                     }
                 });
             };
+            _fisApiClient.OrderConfirmed += (msg) => App.Current.Dispatcher.Invoke(() => Logs.Add(msg));
+            _fisApiClient.OrderRejected += (msg) => App.Current.Dispatcher.Invoke(() => Logs.Add(msg));
 
             Logs = new ObservableCollection<string>();
-            Instruments = new ObservableCollection<Instrument>();
+            _allInstruments = new ObservableCollection<Instrument>();
+            DisplayInstruments = new ObservableCollection<Instrument>();
             Exchanges = new ObservableCollection<ExchangeConfig>(FISApiClient.AvailableExchanges);
 
             ConnectCommand = new AsyncRelayCommand(ConnectAsync);
@@ -48,11 +59,13 @@ namespace Cross_FIS_API_1._0.ViewModels
             ClearInstrumentsCommand = new RelayCommand(ClearInstruments);
         }
 
+        public ObservableCollection<Instrument> DisplayInstruments { get; }
         public ObservableCollection<ExchangeConfig> Exchanges { get; }
         public ICommand ConnectCommand { get; }
         public ICommand FetchInstrumentsCommand { get; }
         public ICommand FetchAllCommand { get; }
         public ICommand ClearInstrumentsCommand { get; }
+        public ICommand OpenCrossOrdersCommand { get; }
 
         public string Status
         {
@@ -85,12 +98,31 @@ namespace Cross_FIS_API_1._0.ViewModels
             }
         }
 
-        public ObservableCollection<Instrument> Instruments
+        public Instrument SelectedInstrument
         {
-            get => _instruments;
+            get => _selectedInstrument;
             set
             {
-                _instruments = value;
+                _selectedInstrument = value;
+                OnPropertyChanged();
+                if (_selectedInstrument != null)
+                {
+                    var crossInstrument = _allInstruments.FirstOrDefault(i => i.ISIN == _selectedInstrument.ISIN && i.Symbol.EndsWith("_C"));
+                    SelectedDetail = new InstrumentDetailViewModel(_selectedInstrument, crossInstrument, _fisApiClient);
+                }
+                else
+                {
+                    SelectedDetail = null;
+                }
+            }
+        }
+
+        public InstrumentDetailViewModel SelectedDetail
+        {
+            get => _selectedDetail;
+            set
+            {
+                _selectedDetail = value;
                 OnPropertyChanged();
             }
         }
@@ -110,12 +142,15 @@ namespace Cross_FIS_API_1._0.ViewModels
 
         private async Task FetchAllInstrumentsAsync()
         {
+            ClearInstruments();
             await _fisApiClient.SendDictionaryRequestAllAsync();
         }
 
         private void ClearInstruments()
         {
-            Instruments.Clear();
+            _allInstruments.Clear();
+            DisplayInstruments.Clear();
+            SelectedDetail = null;
         }
 
         public event PropertyChangedEventHandler PropertyChanged;

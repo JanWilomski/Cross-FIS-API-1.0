@@ -1,23 +1,12 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
 
     <PropertyGroup>
         <OutputType>WinExe</OutputType>
         <TargetFramework>net8.0-windows</TargetFramework>
-        <StartupObject>Cross_FIS_API_1._0.App</StartupObject>
         <RootNamespace>Cross_FIS_API_1._0</RootNamespace>
         <ImplicitUsings>enable</ImplicitUsings>
         <Nullable>enable</Nullable>
         <UseWPF>true</UseWPF>
-<!--        <ApplicationIcon>icon.ico</ApplicationIcon>-->
-        <AssemblyTitle>Cross FIS API 1.0</AssemblyTitle>
-        <AssemblyDescription>FIS API Client for Warsaw Stock Exchange</AssemblyDescription>
-        <AssemblyVersion>1.0.0.0</AssemblyVersion>
-        <FileVersion>1.0.0.0</FileVersion>
-        <Copyright>Copyright © 2024</Copyright>
     </PropertyGroup>
 
-    <ItemGroup>
-        <None Remove="icon.ico" />
-    </ItemGroup>
-
-</Project>
+    </Project>
