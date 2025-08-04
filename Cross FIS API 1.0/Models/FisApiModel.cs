@@ -114,6 +114,7 @@ namespace Cross_FIS_API_1._0.Models
                 bool connected = ProcessConnectionResponse(response);
                 if (connected)
                 {
+                    await SendRealTimeRepliesRequest(); // Subskrypcja odpowiedzi na zlecenia
                     ConnectionStatusChanged?.Invoke("Połączono");
                     _ = Task.Run(ListenForMessages); // Start listening in the background
                 }
@@ -373,35 +374,35 @@ namespace Cross_FIS_API_1._0.Models
             return BuildMessage(data, 5108);
         }
 
-        private void ProcessIncomingMessage(byte[] response)
-        {
-            var stxPos = Array.IndexOf(response, STX);
-            if (stxPos == -1) return;
-
-            var requestNumberStr = Encoding.ASCII.GetString(response, stxPos + 24, 5);
-            if (int.TryParse(requestNumberStr, out int requestNumber))
-            {
-                switch (requestNumber)
-                {
-                    case 1044:
-                        LogMessage?.Invoke("Brak instrumentów dla danego rynku.");
-                        InstrumentsReceived?.Invoke(new List<Instrument>());
-                        break;
-                    case 5108:
-                        ProcessDictionaryResponse(response, stxPos);
-                        break;
-                    case 4102: // Potwierdzenie zlecenia
-                        ProcessOrderConfirmation(response, stxPos);
-                        break;
-                    case 4103: // Odrzucenie zlecenia
-                        ProcessOrderReject(response, stxPos);
-                        break;
-                    default:
-                        LogMessage?.Invoke($"Nieobsługiwany typ wiadomości: {requestNumber}");
-                        break;
-                }
-            }
-        }
+        // private void ProcessIncomingMessage(byte[] response)
+        // {
+        //     var stxPos = Array.IndexOf(response, STX);
+        //     if (stxPos == -1) return;
+        //
+        //     var requestNumberStr = Encoding.ASCII.GetString(response, stxPos + 24, 5);
+        //     if (int.TryParse(requestNumberStr, out int requestNumber))
+        //     {
+        //         switch (requestNumber)
+        //         {
+        //             case 1044:
+        //                 LogMessage?.Invoke("Brak instrumentów dla danego rynku.");
+        //                 InstrumentsReceived?.Invoke(new List<Instrument>());
+        //                 break;
+        //             case 5108:
+        //                 ProcessDictionaryResponse(response, stxPos);
+        //                 break;
+        //             case 4102: // Potwierdzenie zlecenia
+        //                 ProcessOrderConfirmation(response, stxPos);
+        //                 break;
+        //             case 4103: // Odrzucenie zlecenia
+        //                 ProcessOrderReject(response, stxPos);
+        //                 break;
+        //             default:
+        //                 LogMessage?.Invoke($"Nieobsługiwany typ wiadomości: {requestNumber}");
+        //                 break;
+        //         }
+        //     }
+        // }
 
         private void ProcessOrderConfirmation(byte[] response, int stxPos)
         {
@@ -432,6 +433,18 @@ namespace Cross_FIS_API_1._0.Models
             var reason = DecodeField(responseData, ref position);
 
             OrderRejected?.Invoke($"Zlecenie zostało odrzucone. Powód: {reason}");
+        }
+
+        private async Task SendRealTimeRepliesRequest()
+        {
+            LogMessage?.Invoke("Wysyłanie żądania subskrypcji odpowiedzi (2017).");
+            var message = BuildMessage(new byte[0], 2017);
+            await stream.WriteAsync(message, 0, message.Length);
+        }
+
+        private void ProcessRealTimeRepliesConfirmation(byte[] response, int stxPos)
+        {
+            LogMessage?.Invoke("Subskrypcja odpowiedzi na zlecenia została potwierdzona (2018).");
         }
 
         private void ProcessDictionaryResponse(byte[] response, int stxPos)
@@ -516,24 +529,164 @@ namespace Cross_FIS_API_1._0.Models
             LogMessage?.Invoke($"Zlecenie cross order dla {order.InstrumentId} wysłane.");
         }
 
+        // Ulepszona implementacja Cross Order zgodna z dokumentacją FIS
+
         private byte[] BuildCrossOrderMessage(CrossOrder order)
         {
             var dataBuilder = new List<byte>();
+            
+            // User Number (5 bytes) - wymagane w każdym zleceniu
+            var userPadded = user.PadLeft(5, '0');
+            dataBuilder.AddRange(Encoding.ASCII.GetBytes(userPadded));
+            
+            // Request Category - 'O' dla Order
+            dataBuilder.AddRange(Encoding.ASCII.GetBytes("O"));
+            
+            // Command - '0' dla nowego zlecenia
+            dataBuilder.AddRange(Encoding.ASCII.GetBytes("0"));
+            
+            // Stock Code (używając FIS encoding)
             dataBuilder.AddRange(EncodeField(order.InstrumentId));
-            dataBuilder.AddRange(EncodeField("B")); // Strona kupna jako inicjator
+            
+            // Bitmap - definiuje które pola są obecne
+            // Dla cross order potrzebujemy ustawić odpowiednie bity
+            var bitmap = new byte[150]; // Dostosuj rozmiar według potrzeb
+            Array.Fill(bitmap, (byte)' '); // Wypełnij spacjami
+            
+            // Ustawiamy bity dla pól które wysyłamy:
+            // Side (pozycja np. 1)
+            bitmap[0] = (byte)(1 + 32); // '!'
+            dataBuilder.AddRange(bitmap);
+            dataBuilder.AddRange(EncodeField("B")); // Buy side
+            
+            // Quantity (pozycja np. 2)  
             dataBuilder.AddRange(EncodeField(order.Quantity.ToString()));
+            
+            // Price (pozycja np. 3)
             dataBuilder.AddRange(EncodeField(order.Price.ToString("F2")));
-            dataBuilder.AddRange(EncodeField("L")); // Zlecenie typu Limit
-            dataBuilder.AddRange(EncodeField("0")); // Ważne na dzień
+            
+            // Order Type (pozycja np. 4)
+            dataBuilder.AddRange(EncodeField("L")); // Limit
+            
+            // Validity (pozycja np. 5)
+            dataBuilder.AddRange(EncodeField("0")); // Day order
+            
+            // Client Account Buy (pozycja np. 10)
             dataBuilder.AddRange(EncodeField(order.BuyerAccount));
-            dataBuilder.AddRange(EncodeField("C")); // Typ Cross
-            dataBuilder.AddRange(EncodeField("S")); // Strona przeciwna - sprzedaż
+            
+            // Cross Order specific fields:
+            // Cross Type
+            dataBuilder.AddRange(EncodeField("X")); // Cross trade indicator
+            
+            // Contra Side
+            dataBuilder.AddRange(EncodeField("S")); // Sell side
+            
+            // Contra Account
             dataBuilder.AddRange(EncodeField(order.SellerAccount));
+            
+            // Contra Price (może być taka sama jak price)
             dataBuilder.AddRange(EncodeField(order.Price.ToString("F2")));
-
+            
+            // GLID (jeśli wymagane osobno)
+            var glid = ExtractGlidFromInstrument(order.InstrumentId);
+            if (!string.IsNullOrEmpty(glid))
+            {
+                dataBuilder.AddRange(EncodeField(glid));
+            }
+            
             var data = dataBuilder.ToArray();
-            return BuildMessage(data, 2040); // Numer żądania dla zlecenia Cross Order
+            return BuildMessage(data, 2040);
         }
+
+        private string ExtractGlidFromInstrument(string instrumentId)
+        {
+            // Wyciągnij GLID z instrument ID
+            // Format GLID: Exchange(4) + Source(2) + Market(3) + SubMarket(3)
+            if (instrumentId.Length >= 12)
+            {
+                return instrumentId.Substring(0, 12);
+            }
+            return instrumentId;
+        }
+
+        // Dodaj obsługę więcej response codes
+        private void ProcessIncomingMessage(byte[] response)
+        {
+            var stxPos = Array.IndexOf(response, STX);
+            if (stxPos == -1) return;
+
+            var requestNumberStr = Encoding.ASCII.GetString(response, stxPos + 24, 5);
+            if (int.TryParse(requestNumberStr, out int requestNumber))
+            {
+                switch (requestNumber)
+                {
+                    case 1044:
+                        LogMessage?.Invoke("Brak instrumentów dla danego rynku.");
+                        InstrumentsReceived?.Invoke(new List<Instrument>());
+                        break;
+                    case 5108:
+                        ProcessDictionaryResponse(response, stxPos);
+                        break;
+                    case 2019: // Order response (acknowledgment, execution, etc.)
+                        ProcessOrderResponse(response, stxPos);
+                        break;
+                    case 4102: // Order confirmation
+                        ProcessOrderConfirmation(response, stxPos);
+                        break;
+                    case 4103: // Odrzucenie zlecenia
+                        ProcessOrderReject(response, stxPos);
+                        break;
+                    case 2018: // Potwierdzenie subskrypcji odpowiedzi
+                        ProcessRealTimeRepliesConfirmation(response, stxPos);
+                        break;
+                    default:
+                        LogMessage?.Invoke($"Nieobsługiwany typ wiadomości: {requestNumber}");
+                        break;
+                }
+            }
+        }
+
+        private void ProcessOrderResponse(byte[] response, int stxPos)
+        {
+            var dataStart = stxPos + 32;
+            var dataEnd = response.Length - FOOTER_LENGTH;
+            if (dataStart >= dataEnd) return;
+
+            var responseData = new byte[dataEnd - dataStart];
+            Array.Copy(response, dataStart, responseData, 0, responseData.Length);
+
+            var position = 0;
+            
+            // Dekoduj pola odpowiedzi zgodnie z dokumentacją
+            var orderState = DecodeField(responseData, ref position);
+            var orderId = DecodeField(responseData, ref position);
+            var instrumentId = DecodeField(responseData, ref position);
+            
+            LogMessage?.Invoke($"Order Response - State: {orderState}, ID: {orderId}, Instrument: {instrumentId}");
+            
+            // Możliwe stany zgodnie z dokumentacją:
+            switch (orderState)
+            {
+                case "A": // Acknowledged
+                    OrderConfirmed?.Invoke($"Zlecenie {orderId} zostało potwierdzone");
+                    break;
+                case "R": // Rejected
+                    OrderRejected?.Invoke($"Zlecenie {orderId} zostało odrzucone");
+                    break;
+                case "F": // Filled (executed)
+                    OrderConfirmed?.Invoke($"Zlecenie {orderId} zostało zrealizowane");
+                    break;
+                case "C": // Cancelled
+                    LogMessage?.Invoke($"Zlecenie {orderId} zostało anulowane");
+                    break;
+                default:
+                    LogMessage?.Invoke($"Nieznany stan zlecenia: {orderState} dla ID: {orderId}");
+                    break;
+            }
+        }
+
+        // Dodaj metodę do wysyłania subscription przed cross order
+        
 
         public bool IsConnected()
         {
